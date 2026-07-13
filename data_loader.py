@@ -1,10 +1,6 @@
 """
 PairTradingPro v1.0
 data_loader.py
-
-Downloads:
-1. Latest NSE F&O Stock List
-2. Historical Price Data
 """
 
 from __future__ import annotations
@@ -18,7 +14,10 @@ import pandas as pd
 import requests
 import yfinance as yf
 
-from config import LOOKBACK_DAYS, MIN_HISTORY
+from config import (
+    LOOKBACK_DAYS,
+    MIN_HISTORY,
+)
 
 # ============================================================
 # LOGGER
@@ -32,35 +31,31 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============================================================
-# REQUEST HEADERS
+# HEADERS
 # ============================================================
 
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 Chrome/137 Safari/537.36"
-    ),
-    "Accept": "*/*",
-    "Accept-Encoding": "gzip, deflate, br",
+    "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+    "Accept":
+        "*/*",
+    "Accept-Encoding":
+        "gzip, deflate, br",
 }
-
-# ============================================================
-# BAD SYMBOLS
-# ============================================================
 
 BAD_SYMBOLS = {
     "NIFTY",
     "BANKNIFTY",
     "FINNIFTY",
     "MIDCPNIFTY",
-    "NIFTYNXT50"
+    "NIFTYNXT50",
 }
 
 # ============================================================
 # DOWNLOAD NSE F&O LIST
 # ============================================================
 
-def get_latest_fno_list(days_back: int = 10) -> list[str]:
+def get_latest_fno_list(days_back: int = 10):
 
     logger.info("Downloading latest NSE F&O List...")
 
@@ -72,11 +67,9 @@ def get_latest_fno_list(days_back: int = 10) -> list[str]:
 
         urls = [
 
-            f"https://nsearchives.nseindia.com/content/fo/"
-            f"BhavCopy_NSE_FO_0_0_0_{date_str}_F_0000.csv.zip",
+            f"https://nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_0_0_0_{date_str}_F_0000.csv.zip",
 
-            f"https://nsearchives.nseindia.com/content/fo/"
-            f"BhavCopy_NSE_FO_0_0_0_{date_str}.csv.zip"
+            f"https://nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_0_0_0_{date_str}.csv.zip",
 
         ]
 
@@ -103,46 +96,73 @@ def get_latest_fno_list(days_back: int = 10) -> list[str]:
 
                         df = pd.read_csv(f)
 
-                symbol_column = None
+                symbol_col = None
 
                 for col in df.columns:
 
                     if "symb" in col.lower():
 
-                        symbol_column = col
+                        symbol_col = col
 
                         break
 
-                if symbol_column is None:
-                    continue
+                if symbol_col is None:
 
-                symbols = (
-                    df[symbol_column]
-                    .dropna()
-                    .astype(str)
-                    .str.strip()
-                    .unique()
-                    .tolist()
-                )
+                    symbol_col = df.columns[0]
+
+                stocks = df[symbol_col].dropna().unique().tolist()
+
+                if "FinInstrmTp" in df.columns:
+
+                    eq_stocks = (
+
+                        df[
+                            df["FinInstrmTp"] == "EQ"
+                        ][symbol_col]
+
+                        .dropna()
+
+                        .unique()
+
+                        .tolist()
+
+                    )
+
+                    if eq_stocks:
+
+                        stocks = eq_stocks
 
                 tickers = []
 
-                for symbol in symbols:
+                for stock in stocks:
 
-                    if (
-                        symbol == ""
-                        or symbol.isdigit()
-                        or symbol in BAD_SYMBOLS
-                    ):
+                    stock = str(stock).strip()
+
+                    if not stock:
+
                         continue
 
-                    tickers.append(symbol + ".NS")
+                    if stock.isdigit():
 
-                tickers = sorted(list(set(tickers)))
+                        continue
+
+                    if stock in BAD_SYMBOLS:
+
+                        continue
+
+                    tickers.append(
+                        stock + ".NS"
+                    )
+
+                tickers = sorted(
+                    list(
+                        set(tickers)
+                    )
+                )
 
                 logger.info(
                     "Loaded %d F&O Stocks",
-                    len(tickers)
+                    len(tickers),
                 )
 
                 return tickers
@@ -151,96 +171,41 @@ def get_latest_fno_list(days_back: int = 10) -> list[str]:
 
                 continue
 
-    logger.warning("Unable to download NSE F&O list.")
+    logger.error(
+        "Unable to download NSE F&O List."
+    )
 
     return []
 
-# ============================================================
-# DOWNLOAD HISTORICAL PRICE DATA
-# ============================================================
-
-def download_price_data(
-    tickers: list[str],
-    lookback_days: int = LOOKBACK_DAYS,
-):
-
-    if not tickers:
-        return pd.DataFrame(), pd.DataFrame()
-
-    end_date = datetime.today()
-
-    start_date = end_date - timedelta(days=lookback_days)
-
     logger.info(
-        "Downloading historical prices for %d stocks...",
-        len(tickers)
+        "Successfully loaded %d/%d stocks",
+        success,
+        total,
     )
 
-    try:
+    if failed:
 
-        data = yf.download(
-            tickers=tickers,
-            start=start_date.strftime("%Y-%m-%d"),
-            end=end_date.strftime("%Y-%m-%d"),
-            auto_adjust=True,
-            progress=False,
-            group_by="ticker",
-            threads=8,
+        logger.warning(
+            "%d symbols skipped",
+            len(failed),
         )
 
-    except Exception as e:
+    close_df = pd.DataFrame(close_data)
 
-        logger.error(
-            "Yahoo download failed : %s",
-            e
-        )
+    volume_df = pd.DataFrame(volume_data)
+
+    if close_df.empty:
 
         return (
             pd.DataFrame(),
             pd.DataFrame(),
         )
 
-    close_data = {}
+    close_df = close_df.dropna()
 
-    volume_data = {}
-
-    failed = []
-
-    for ticker in tickers:
-
-        try:
-
-            close = data[ticker]["Close"]
-
-            volume = data[ticker]["Volume"]
-
-            if len(close.dropna()) < MIN_HISTORY:
-                failed.append(ticker)
-                continue
-
-            name = ticker.replace(".NS", "")
-
-            close_data[name] = close
-
-            volume_data[name] = volume
-
-        except Exception:
-
-            failed.append(ticker)
-
-    close_df = pd.DataFrame(close_data)
-
-    volume_df = pd.DataFrame(volume_data)
-
-    close_df.dropna(
-        axis=1,
-        inplace=True,
-    )
-
-    volume_df.dropna(
-        axis=1,
-        inplace=True,
-    )
+    volume_df = volume_df.loc[
+        close_df.index
+    ]
 
     common = close_df.columns.intersection(
         volume_df.columns
@@ -250,25 +215,14 @@ def download_price_data(
 
     volume_df = volume_df[common]
 
-    logger.info(
-        "Successfully loaded %d stocks",
-        len(common)
-    )
-
-    if failed:
-
-        logger.warning(
-            "%d symbols skipped",
-            len(failed)
-        )
-
     return (
         close_df,
         volume_df,
     )
 
+
 # ============================================================
-# LOAD COMPLETE MARKET DATA
+# LOAD MARKET DATA
 # ============================================================
 
 def load_market_data():
@@ -281,7 +235,9 @@ def load_market_data():
 
     if not tickers:
 
-        logger.error("Unable to load NSE F&O list")
+        logger.error(
+            "Unable to load NSE F&O List"
+        )
 
         return (
             [],
@@ -290,12 +246,14 @@ def load_market_data():
         )
 
     close_df, volume_df = download_price_data(
-        tickers=tickers
+        tickers
     )
 
     if close_df.empty:
 
-        logger.error("Price data download failed")
+        logger.error(
+            "Price data download failed"
+        )
 
         return (
             [],
@@ -304,9 +262,17 @@ def load_market_data():
         )
 
     logger.info("=" * 60)
-    logger.info("Market Data Ready")
-    logger.info("Stocks Loaded : %d", len(close_df.columns))
-    logger.info("Rows Loaded   : %d", len(close_df))
+    logger.info(
+        "Market Data Ready"
+    )
+    logger.info(
+        "Stocks Loaded : %d",
+        len(close_df.columns),
+    )
+    logger.info(
+        "Rows Loaded : %d",
+        len(close_df),
+    )
     logger.info("=" * 60)
 
     return (
@@ -322,12 +288,25 @@ def load_market_data():
 
 if __name__ == "__main__":
 
-    stocks, close_prices, volume_data = load_market_data()
+    stocks, close_df, volume_df = load_market_data()
 
     print()
 
     print("=" * 60)
-    print("TOTAL STOCKS :", len(stocks))
-    print("PRICE SHAPE  :", close_prices.shape)
-    print("VOLUME SHAPE :", volume_data.shape)
+
+    print(
+        "TOTAL STOCKS :",
+        len(stocks),
+    )
+
+    print(
+        "PRICE SHAPE :",
+        close_df.shape,
+    )
+
+    print(
+        "VOLUME SHAPE :",
+        volume_df.shape,
+    )
+
     print("=" * 60)

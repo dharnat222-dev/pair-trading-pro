@@ -52,17 +52,78 @@ BAD_SYMBOLS = {
 }
 
 # ============================================================
+# FALLBACK STOCKS (NIFTY 50 + BANK NIFTY)
+# ============================================================
+
+def get_fallback_stocks():
+    """NIFTY 50 + BANK NIFTY stocks as fallback when BhavCopy fails"""
+    return [
+        # NIFTY 50
+        "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS",
+        "ICICIBANK.NS", "HINDUNILVR.NS", "ITC.NS", "SBIN.NS",
+        "BHARTIARTL.NS", "KOTAKBANK.NS", "LT.NS", "AXISBANK.NS",
+        "WIPRO.NS", "HCLTECH.NS", "ASIANPAINT.NS", "MARUTI.NS",
+        "SUNPHARMA.NS", "TITAN.NS", "ULTRACEMCO.NS", "NTPC.NS",
+        "ONGC.NS", "POWERGRID.NS", "NESTLEIND.NS", "M&M.NS",
+        "TECHM.NS", "JSWSTEEL.NS", "BAJFINANCE.NS",
+        "ADANIPORTS.NS", "COALINDIA.NS", "GRASIM.NS", "INDUSINDBK.NS",
+        "TATASTEEL.NS", "BRITANNIA.NS", "APOLLOHOSP.NS", "SBILIFE.NS",
+        "HINDALCO.NS", "UPL.NS", "EICHERMOT.NS", "SHREECEM.NS",
+        "CIPLA.NS", "DRREDDY.NS", "HEROMOTOCO.NS", "TATAMOTORS.NS",
+        "TATACONSUM.NS", "TCS.NS", "BAJAJFINSV.NS",
+        # BANK NIFTY (additional banking stocks)
+        "BANKBARODA.NS", "PNB.NS", "CANBK.NS", "IDFCBANK.NS",
+        "FEDERALBNK.NS", "RBLBANK.NS", "UNIONBANK.NS", "BANDHANBNK.NS",
+        "AUBANK.NS", "SURYODAY.NS",
+    ]
+
+# ============================================================
 # DOWNLOAD NSE F&O LIST
 # ============================================================
 
-def get_latest_fno_list(days_back: int = 10):
+def process_bhavcopy_data(df: pd.DataFrame, symbol_col: str):
+    """Process BhavCopy DataFrame and extract tickers"""
+    
+    stocks = (
+        df[symbol_col]
+        .dropna()
+        .astype(str)
+        .str.strip()
+        .unique()
+        .tolist()
+    )
 
+    if "FinInstrmTp" in df.columns:
+        eq = (
+            df[
+                df["FinInstrmTp"] == "EQ"
+            ][symbol_col]
+            .dropna()
+            .astype(str)
+        )
+        if not eq.empty:
+            stocks = eq.unique().tolist()
+
+    tickers = []
+    for stock in stocks:
+        stock = stock.strip()
+        if (
+            not stock
+            or stock.isdigit()
+            or stock in BAD_SYMBOLS
+        ):
+            continue
+        tickers.append(f"{stock}.NS")
+
+    return sorted(set(tickers))
+
+def get_latest_fno_list(days_back: int = 10):
+    """Download NSE F&O list with fallback"""
+    
     logger.info("Downloading latest NSE F&O List...")
 
     for i in range(days_back):
-
         date = datetime.today() - timedelta(days=i)
-
         date_str = date.strftime("%Y%m%d")
 
         urls = [
@@ -71,9 +132,7 @@ def get_latest_fno_list(days_back: int = 10):
         ]
 
         for url in urls:
-
             try:
-
                 response = requests.get(
                     url,
                     headers=HEADERS,
@@ -86,11 +145,8 @@ def get_latest_fno_list(days_back: int = 10):
                 with zipfile.ZipFile(
                     io.BytesIO(response.content)
                 ) as z:
-
                     csv_name = z.namelist()[0]
-
                     with z.open(csv_name) as f:
-
                         df = pd.read_csv(f)
 
                 symbol_col = next(
@@ -101,65 +157,24 @@ def get_latest_fno_list(days_back: int = 10):
                     df.columns[0],
                 )
 
-                stocks = (
-                    df[symbol_col]
-                    .dropna()
-                    .astype(str)
-                    .str.strip()
-                    .unique()
-                    .tolist()
-                )
-
-                if "FinInstrmTp" in df.columns:
-
-                    eq = (
-                        df[
-                            df["FinInstrmTp"] == "EQ"
-                        ][symbol_col]
-                        .dropna()
-                        .astype(str)
+                tickers = process_bhavcopy_data(df, symbol_col)
+                
+                if tickers:
+                    logger.info(
+                        "Loaded %d F&O Stocks from BhavCopy",
+                        len(tickers),
                     )
+                    return tickers
 
-                    if not eq.empty:
-                        stocks = eq.unique().tolist()
-
-                tickers = []
-
-                for stock in stocks:
-
-                    stock = stock.strip()
-
-                    if (
-                        not stock
-                        or stock.isdigit()
-                        or stock in BAD_SYMBOLS
-                    ):
-                        continue
-
-                    tickers.append(
-                        f"{stock}.NS"
-                    )
-
-                tickers = sorted(
-                    set(tickers)
-                )
-
-                logger.info(
-                    "Loaded %d F&O Stocks",
-                    len(tickers),
-                )
-
-                return tickers
-
-            except Exception:
-
+            except Exception as e:
+                logger.debug(f"BhavCopy attempt failed: {e}")
                 continue
 
-    logger.error(
-        "Unable to download NSE F&O List."
-    )
-
-    return []
+    # If BhavCopy fails, use fallback
+    logger.warning("BhavCopy download failed. Using fallback NIFTY 50 stocks...")
+    fallback_stocks = get_fallback_stocks()
+    logger.info("Loaded %d fallback stocks", len(fallback_stocks))
+    return fallback_stocks
 
 # ============================================================
 # DOWNLOAD HISTORICAL PRICE DATA
@@ -171,18 +186,10 @@ def download_price_data(
 ):
 
     if not tickers:
-
-        return (
-            pd.DataFrame(),
-            pd.DataFrame(),
-        )
+        return pd.DataFrame(), pd.DataFrame()
 
     end_date = datetime.today()
-
-    start_date = (
-        end_date
-        - timedelta(days=lookback_days)
-    )
+    start_date = end_date - timedelta(days=lookback_days)
 
     logger.info(
         "Downloading historical prices for %d stocks...",
@@ -190,89 +197,54 @@ def download_price_data(
     )
 
     close_data = {}
-
     volume_data = {}
-
     failed = []
-
     success = 0
-
     total = len(tickers)
 
-    for i, ticker in enumerate(
-        tickers,
-        start=1,
-    ):
-
+    for i, ticker in enumerate(tickers, start=1):
         try:
-
-            hist = yf.Ticker(
-                ticker
-            ).history(
-
-                start=start_date.strftime("%Y-%m-%d"),
-
-                end=end_date.strftime("%Y-%m-%d"),
-
-                interval="1d",
-
-                auto_adjust=True,
-
-            )
+            # Add retry mechanism
+            for attempt in range(3):
+                try:
+                    hist = yf.Ticker(ticker).history(
+                        start=start_date.strftime("%Y-%m-%d"),
+                        end=end_date.strftime("%Y-%m-%d"),
+                        interval="1d",
+                        auto_adjust=True,
+                    )
+                    break
+                except Exception:
+                    if attempt == 2:
+                        raise
+                    continue
 
             if hist.empty:
-
-                failed.append(
-                    ticker
-                )
-
+                failed.append(ticker)
                 continue
 
             hist = hist.tz_localize(None)
 
             if len(hist) < MIN_HISTORY:
-
-                failed.append(
-                    ticker
-                )
-
+                failed.append(ticker)
                 continue
 
-            symbol = ticker.replace(
-                ".NS",
-                "",
-            )
-
-            close_data[symbol] = hist[
-                "Close"
-            ]
-
-            volume_data[symbol] = hist[
-                "Volume"
-            ]
-
+            symbol = ticker.replace(".NS", "")
+            close_data[symbol] = hist["Close"]
+            volume_data[symbol] = hist["Volume"]
             success += 1
 
             if i % 20 == 0:
-
                 logger.info(
-
                     "Downloaded %d/%d stocks (%d successful)",
-
                     i,
-
                     total,
-
                     success,
-
                 )
 
-        except Exception:
-
-            failed.append(
-                ticker
-            )
-
+        except Exception as e:
+            logger.debug(f"Failed to download {ticker}: {e}")
+            failed.append(ticker)
             continue
 
     logger.info(
@@ -282,72 +254,41 @@ def download_price_data(
     )
 
     if failed:
-
         logger.warning(
-            "%d symbols skipped",
+            "%d symbols skipped: %s",
             len(failed),
+            ", ".join(failed[:10]) + ("..." if len(failed) > 10 else ""),
         )
 
-    close_df = pd.DataFrame(
-        close_data
-    )
-
-    volume_df = pd.DataFrame(
-        volume_data
-    )
+    close_df = pd.DataFrame(close_data)
+    volume_df = pd.DataFrame(volume_data)
 
     if close_df.empty:
-
-        return (
-            pd.DataFrame(),
-            pd.DataFrame(),
-        )
+        logger.error("No price data downloaded")
+        return pd.DataFrame(), pd.DataFrame()
 
     # Remove stocks having incomplete history
-    close_df = close_df.dropna(
-        axis=1,
-    )
-
-    volume_df = volume_df.dropna(
-        axis=1,
-    )
+    close_df = close_df.dropna(axis=1)
+    volume_df = volume_df.dropna(axis=1)
 
     # Keep only common stocks
-    common = close_df.columns.intersection(
-        volume_df.columns
-    )
-
-    close_df = close_df[
-        common
-    ]
-
-    volume_df = volume_df[
-        common
-    ]
+    common = close_df.columns.intersection(volume_df.columns)
+    close_df = close_df[common]
+    volume_df = volume_df[common]
 
     # Keep only common dates
-    common_index = close_df.index.intersection(
-        volume_df.index
-    )
+    common_index = close_df.index.intersection(volume_df.index)
+    close_df = close_df.loc[common_index]
+    volume_df = volume_df.loc[common_index]
 
-    close_df = close_df.loc[
-        common_index
-    ]
-
-    volume_df = volume_df.loc[
-        common_index
-    ]
-
-    return (
-        close_df,
-        volume_df,
-    )
+    return close_df, volume_df
 
 # ============================================================
 # LOAD MARKET DATA
 # ============================================================
 
 def load_market_data():
+    """Load market data with better error handling"""
 
     logger.info("=" * 60)
     logger.info("Loading Market Data")
@@ -356,62 +297,34 @@ def load_market_data():
     tickers = get_latest_fno_list()
 
     if not tickers:
+        logger.error("Unable to load stock list")
+        return [], pd.DataFrame(), pd.DataFrame()
 
-        logger.error(
-            "Unable to load NSE F&O List"
-        )
-
-        return (
-            [],
-            pd.DataFrame(),
-            pd.DataFrame(),
-        )
-
-    close_df, volume_df = download_price_data(
-        tickers=tickers,
-    )
+    close_df, volume_df = download_price_data(tickers=tickers)
 
     if close_df.empty:
-
-        logger.error(
-            "Price data download failed"
-        )
-
-        return (
-            [],
-            pd.DataFrame(),
-            pd.DataFrame(),
-        )
+        logger.error("Price data download failed")
+        return [], pd.DataFrame(), pd.DataFrame()
 
     logger.info("=" * 60)
     logger.info("Market Data Ready")
-    logger.info(
-        "Stocks Loaded : %d",
-        len(close_df.columns),
-    )
-    logger.info(
-        "Rows Loaded : %d",
-        len(close_df),
-    )
+    logger.info("Stocks Loaded : %d", len(close_df.columns))
+    logger.info("Rows Loaded   : %d", len(close_df))
+    logger.info("Date Range    : %s to %s", 
+                close_df.index[0].strftime("%Y-%m-%d"),
+                close_df.index[-1].strftime("%Y-%m-%d"))
     logger.info("=" * 60)
 
-    return (
-        list(close_df.columns),
-        close_df,
-        volume_df,
-    )
-
+    return list(close_df.columns), close_df, volume_df
 
 # ============================================================
 # TEST
 # ============================================================
 
 if __name__ == "__main__":
-
     stocks, close_df, volume_df = load_market_data()
 
     print()
-
     print("=" * 60)
     print("TOTAL STOCKS :", len(stocks))
     print("PRICE SHAPE  :", close_df.shape)

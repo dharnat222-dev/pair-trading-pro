@@ -17,6 +17,8 @@ import yfinance as yf
 from config import (
     LOOKBACK_DAYS,
     MIN_HISTORY,
+    USE_CSV_DATA,
+    CSV_FILE_PATH,
 )
 
 # ============================================================
@@ -56,7 +58,7 @@ BAD_SYMBOLS = {
 # ============================================================
 
 def get_fallback_stocks():
-    """NIFTY 50 + BANK NIFTY stocks as fallback when BhavCopy fails"""
+    """NIFTY 50 + BANK NIFTY stocks as fallback"""
     return [
         # NIFTY 50
         "RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS",
@@ -70,12 +72,42 @@ def get_fallback_stocks():
         "TATASTEEL.NS", "BRITANNIA.NS", "APOLLOHOSP.NS", "SBILIFE.NS",
         "HINDALCO.NS", "UPL.NS", "EICHERMOT.NS", "SHREECEM.NS",
         "CIPLA.NS", "DRREDDY.NS", "HEROMOTOCO.NS", "TATAMOTORS.NS",
-        "TATACONSUM.NS", "TCS.NS", "BAJAJFINSV.NS",
-        # BANK NIFTY (additional banking stocks)
+        "TATACONSUM.NS", "BAJAJFINSV.NS",
+        # BANK NIFTY
         "BANKBARODA.NS", "PNB.NS", "CANBK.NS", "IDFCBANK.NS",
         "FEDERALBNK.NS", "RBLBANK.NS", "UNIONBANK.NS", "BANDHANBNK.NS",
-        "AUBANK.NS", "SURYODAY.NS",
+        "AUBANK.NS",
     ]
+
+# ============================================================
+# LOAD FROM CSV
+# ============================================================
+
+def load_from_csv():
+    """Load stock data from CSV file"""
+    try:
+        if not CSV_FILE_PATH.exists():
+            logger.warning("CSV file not found: %s", CSV_FILE_PATH)
+            return None, None
+        
+        df = pd.read_csv(CSV_FILE_PATH, index_col=0, parse_dates=True)
+        
+        if df.empty:
+            logger.warning("CSV file is empty")
+            return None, None
+        
+        # Clean column names
+        df.columns = [col.strip().upper() for col in df.columns]
+        
+        # Create volume DataFrame (dummy - we only have price data)
+        volume_df = pd.DataFrame(1, index=df.index, columns=df.columns)
+        
+        logger.info("✅ Loaded %d stocks from CSV: %s", len(df.columns), CSV_FILE_PATH)
+        return df, volume_df
+        
+    except Exception as e:
+        logger.error("Failed to load CSV: %s", str(e))
+        return None, None
 
 # ============================================================
 # DOWNLOAD NSE F&O LIST
@@ -118,7 +150,7 @@ def process_bhavcopy_data(df: pd.DataFrame, symbol_col: str):
     return sorted(set(tickers))
 
 def get_latest_fno_list(days_back: int = 10):
-    """Download NSE F&O list with fallback"""
+    """Download NSE F&O list"""
     
     logger.info("Downloading latest NSE F&O List...")
 
@@ -160,10 +192,7 @@ def get_latest_fno_list(days_back: int = 10):
                 tickers = process_bhavcopy_data(df, symbol_col)
                 
                 if tickers:
-                    logger.info(
-                        "Loaded %d F&O Stocks from BhavCopy",
-                        len(tickers),
-                    )
+                    logger.info("✅ Loaded %d F&O Stocks from BhavCopy", len(tickers))
                     return tickers
 
             except Exception as e:
@@ -171,30 +200,25 @@ def get_latest_fno_list(days_back: int = 10):
                 continue
 
     # If BhavCopy fails, use fallback
-    logger.warning("BhavCopy download failed. Using fallback NIFTY 50 stocks...")
+    logger.warning("⚠️ BhavCopy failed. Using fallback NIFTY 50 stocks...")
     fallback_stocks = get_fallback_stocks()
-    logger.info("Loaded %d fallback stocks", len(fallback_stocks))
+    logger.info("✅ Loaded %d fallback stocks", len(fallback_stocks))
     return fallback_stocks
 
 # ============================================================
-# DOWNLOAD HISTORICAL PRICE DATA
+# DOWNLOAD FROM YFINANCE
 # ============================================================
 
-def download_price_data(
-    tickers: list[str],
-    lookback_days: int = LOOKBACK_DAYS,
-):
-
+def download_from_yfinance(tickers: list[str], lookback_days: int = LOOKBACK_DAYS):
+    """Download price data from yfinance"""
+    
     if not tickers:
         return pd.DataFrame(), pd.DataFrame()
 
     end_date = datetime.today()
     start_date = end_date - timedelta(days=lookback_days)
 
-    logger.info(
-        "Downloading historical prices for %d stocks...",
-        len(tickers),
-    )
+    logger.info("Downloading historical prices for %d stocks...", len(tickers))
 
     close_data = {}
     volume_data = {}
@@ -204,7 +228,7 @@ def download_price_data(
 
     for i, ticker in enumerate(tickers, start=1):
         try:
-            # Add retry mechanism
+            # Retry mechanism
             for attempt in range(3):
                 try:
                     hist = yf.Ticker(ticker).history(
@@ -235,87 +259,103 @@ def download_price_data(
             success += 1
 
             if i % 20 == 0:
-                logger.info(
-                    "Downloaded %d/%d stocks (%d successful)",
-                    i,
-                    total,
-                    success,
-                )
+                logger.info("Downloaded %d/%d stocks (%d successful)", i, total, success)
 
         except Exception as e:
-            logger.debug(f"Failed to download {ticker}: {e}")
             failed.append(ticker)
             continue
 
-    logger.info(
-        "Successfully loaded %d/%d stocks",
-        success,
-        total,
-    )
+    logger.info("✅ Successfully loaded %d/%d stocks", success, total)
 
     if failed:
-        logger.warning(
-            "%d symbols skipped: %s",
-            len(failed),
-            ", ".join(failed[:10]) + ("..." if len(failed) > 10 else ""),
-        )
+        logger.warning("⚠️ %d symbols skipped", len(failed))
 
     close_df = pd.DataFrame(close_data)
     volume_df = pd.DataFrame(volume_data)
 
     if close_df.empty:
-        logger.error("No price data downloaded")
         return pd.DataFrame(), pd.DataFrame()
-
-    # Remove stocks having incomplete history
-    close_df = close_df.dropna(axis=1)
-    volume_df = volume_df.dropna(axis=1)
 
     # Keep only common stocks
     common = close_df.columns.intersection(volume_df.columns)
     close_df = close_df[common]
     volume_df = volume_df[common]
 
-    # Keep only common dates
-    common_index = close_df.index.intersection(volume_df.index)
-    close_df = close_df.loc[common_index]
-    volume_df = volume_df.loc[common_index]
-
     return close_df, volume_df
 
 # ============================================================
-# LOAD MARKET DATA
+# LOAD MARKET DATA (MAIN)
 # ============================================================
 
 def load_market_data():
-    """Load market data with better error handling"""
-
+    """Load market data - tries CSV first, then yfinance"""
+    
     logger.info("=" * 60)
     logger.info("Loading Market Data")
     logger.info("=" * 60)
-
+    
+    # ======= OPTION 1: LOAD FROM CSV =======
+    if USE_CSV_DATA:
+        logger.info("📂 Attempting to load from CSV: %s", CSV_FILE_PATH)
+        close_df, volume_df = load_from_csv()
+        
+        if close_df is not None and not close_df.empty:
+            logger.info("✅ Market Data Loaded from CSV")
+            logger.info("📊 Stocks Loaded : %d", len(close_df.columns))
+            logger.info("📊 Rows Loaded   : %d", len(close_df))
+            logger.info("📊 Date Range    : %s to %s", 
+                       close_df.index[0].strftime("%Y-%m-%d"),
+                       close_df.index[-1].strftime("%Y-%m-%d"))
+            logger.info("=" * 60)
+            return list(close_df.columns), close_df, volume_df
+        else:
+            logger.warning("⚠️ CSV load failed, falling back to yfinance...")
+    
+    # ======= OPTION 2: DOWNLOAD FROM YFINANCE =======
+    logger.info("🌐 Downloading from yfinance...")
+    
     tickers = get_latest_fno_list()
-
     if not tickers:
-        logger.error("Unable to load stock list")
+        logger.error("❌ No tickers available")
         return [], pd.DataFrame(), pd.DataFrame()
-
-    close_df, volume_df = download_price_data(tickers=tickers)
-
+    
+    close_df, volume_df = download_from_yfinance(tickers)
+    
     if close_df.empty:
-        logger.error("Price data download failed")
+        logger.error("❌ Price data download failed")
         return [], pd.DataFrame(), pd.DataFrame()
-
+    
+    logger.info("✅ Market Data Ready from yfinance")
+    logger.info("📊 Stocks Loaded : %d", len(close_df.columns))
+    logger.info("📊 Rows Loaded   : %d", len(close_df))
+    logger.info("📊 Date Range    : %s to %s", 
+               close_df.index[0].strftime("%Y-%m-%d"),
+               close_df.index[-1].strftime("%Y-%m-%d"))
     logger.info("=" * 60)
-    logger.info("Market Data Ready")
-    logger.info("Stocks Loaded : %d", len(close_df.columns))
-    logger.info("Rows Loaded   : %d", len(close_df))
-    logger.info("Date Range    : %s to %s", 
-                close_df.index[0].strftime("%Y-%m-%d"),
-                close_df.index[-1].strftime("%Y-%m-%d"))
-    logger.info("=" * 60)
-
+    
     return list(close_df.columns), close_df, volume_df
+
+# ============================================================
+# SAVE CSV TEMPLATE
+# ============================================================
+
+def save_csv_template():
+    """Download data and save as CSV template"""
+    
+    logger.info("Creating CSV template...")
+    
+    tickers = get_fallback_stocks()[:20]  # Just 20 stocks for template
+    
+    close_df, volume_df = download_from_yfinance(tickers)
+    
+    if close_df.empty:
+        logger.error("❌ Failed to create template")
+        return
+    
+    # Save to CSV
+    close_df.to_csv(CSV_FILE_PATH)
+    logger.info("✅ Template saved to: %s", CSV_FILE_PATH)
+    logger.info("📊 Stocks: %d, Rows: %d", len(close_df.columns), len(close_df))
 
 # ============================================================
 # TEST

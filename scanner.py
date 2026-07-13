@@ -3,22 +3,31 @@ PairTradingPro v1.0
 scanner.py
 """
 
+from __future__ import annotations
+
 from itertools import combinations
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import (
+    ThreadPoolExecutor,
+    as_completed,
+)
+
 import traceback
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 from config import (
     MAX_WORKERS,
+    TOP_PAIRS,
+    OUTPUT_DIR,
     MIN_ZSCORE,
     MAX_VOLATILITY,
     MIN_AVG_VOLUME,
-    TOP_PAIRS,
-    OUTPUT_DIR,
+    ROLLING_WINDOW,
 )
 
-from data_loader import load_market_data
+from data_loader import (
+    load_market_data,
+)
 
 from statistics import (
     calculate_correlation,
@@ -38,6 +47,10 @@ from statistics import (
     get_trade_quality,
 )
 
+
+# ============================================================
+# ANALYZE ONE PAIR
+# ============================================================
 
 def analyze_pair(
     ticker1: str,
@@ -60,22 +73,25 @@ def analyze_pair(
         if np.isnan(correlation):
             return None
 
-        rolling = calculate_rolling_correlation(
+        rolling_corr = calculate_rolling_correlation(
             s1,
             s2,
+            ROLLING_WINDOW,
         )
 
-        if rolling.dropna().empty:
+        if rolling_corr.dropna().empty:
             return None
 
-        rolling_corr = rolling.iloc[-1]
+        rolling_last = float(
+            rolling_corr.dropna().iloc[-1]
+        )
 
-        score, coint_p = calculate_cointegration(
+        _, coint_pvalue = calculate_cointegration(
             s1,
             s2,
         )
 
-        beta, alpha = calculate_beta(
+        beta, _ = calculate_beta(
             s1,
             s2,
         )
@@ -89,15 +105,15 @@ def analyze_pair(
             beta,
         )
 
-        adf_stat, adf_p = calculate_adf(
+        _, adf_pvalue = calculate_adf(
             spread,
         )
 
         if not validate_pair(
             correlation,
-            rolling_corr,
-            coint_p,
-            adf_p,
+            rolling_last,
+            coint_pvalue,
+            adf_pvalue,
             beta,
         ):
             return None
@@ -112,6 +128,7 @@ def analyze_pair(
 
         zscore = calculate_zscore(
             spread,
+            ROLLING_WINDOW,
         )
 
         if np.isnan(zscore):
@@ -120,9 +137,8 @@ def analyze_pair(
         if abs(zscore) < MIN_ZSCORE:
             return None
 
-        volatility = (
-            s1.pct_change()
-            .std()
+        volatility = float(
+            s1.pct_change().std()
             * np.sqrt(252)
         )
 
@@ -132,65 +148,92 @@ def analyze_pair(
         if volatility > MAX_VOLATILITY:
             return None
 
-        volume1 = float(
+        avg_volume1 = float(
             volume_data[ticker1]
             .tail(20)
             .mean()
         )
 
-        volume2 = float(
+        avg_volume2 = float(
             volume_data[ticker2]
             .tail(20)
             .mean()
         )
 
         if (
-            volume1 < MIN_AVG_VOLUME
+            avg_volume1 < MIN_AVG_VOLUME
             or
-            volume2 < MIN_AVG_VOLUME
+            avg_volume2 < MIN_AVG_VOLUME
         ):
             return None
 
         action1, action2 = get_trade_signal(
-            zscore
+            zscore,
         )
 
         score = calculate_mean_reversion_score(
             correlation,
-            coint_p,
-            adf_p,
+            coint_pvalue,
+            adf_pvalue,
             hurst,
             half_life,
         )
 
-        quality = get_trade_quality(
-            score
+        trade_quality = get_trade_quality(
+            score,
         )
 
-        position = get_position_size(
-            volatility
+        position_size = get_position_size(
+            volatility,
         )
 
-        entry = float(spread.iloc[-1])
-
-        target = float(
-            spread.rolling(60).mean().iloc[-1]
+        rolling_mean = (
+            spread
+            .rolling(ROLLING_WINDOW)
+            .mean()
+            .iloc[-1]
         )
 
-        std = float(
-            spread.rolling(60).std().iloc[-1]
+        rolling_std = (
+            spread
+            .rolling(ROLLING_WINDOW)
+            .std()
+            .iloc[-1]
         )
 
-        if entry > target:
-            stop = entry + (2 * std)
+        if pd.isna(rolling_mean) or pd.isna(rolling_std):
+            return None
+
+        entry_spread = float(
+            spread.iloc[-1]
+        )
+
+        target_spread = float(
+            rolling_mean
+        )
+
+        if entry_spread > target_spread:
+
+            stop_spread = (
+                entry_spread
+                + (2 * rolling_std)
+            )
+
         else:
-            stop = entry - (2 * std)
 
-        rr = calculate_risk_reward(
-            entry,
-            target,
-            stop,
+            stop_spread = (
+                entry_spread
+                - (2 * rolling_std)
+            )
+
+        risk_reward = calculate_risk_reward(
+            entry_spread,
+            target_spread,
+            stop_spread,
         )
+
+        if np.isnan(risk_reward):
+            risk_reward = 0.0
 
         return {
 
@@ -201,42 +244,83 @@ def analyze_pair(
             "Action2": action2,
 
             "Correlation": round(correlation, 4),
-            "RollingCorrelation": round(rolling_corr, 4),
 
-            "CointegrationPValue": round(coint_p, 4),
+            "RollingCorrelation": round(
+                rolling_last,
+                4,
+            ),
 
-            "ADFPValue": round(adf_p, 4),
+            "CointegrationPValue": round(
+                coint_pvalue,
+                4,
+            ),
 
-            "Beta": round(beta, 4),
+            "ADFPValue": round(
+                adf_pvalue,
+                4,
+            ),
 
-            "HalfLife": round(half_life, 2),
+            "Beta": round(
+                beta,
+                4,
+            ),
 
-            "Hurst": round(hurst, 4),
+            "HalfLife": round(
+                half_life,
+                2,
+            ),
 
-            "ZScore": round(zscore, 2),
+            "Hurst": round(
+                hurst,
+                4,
+            ),
 
-            "Volatility": round(volatility, 4),
+            "ZScore": round(
+                zscore,
+                2,
+            ),
 
-            "AverageVolume1": int(volume1),
-            "AverageVolume2": int(volume2),
+            "Volatility": round(
+                volatility,
+                4,
+            ),
 
-            "EntrySpread": round(entry, 4),
-            "TargetSpread": round(target, 4),
-            "StopSpread": round(stop, 4),
+            "AverageVolume1": int(avg_volume1),
 
-            "RiskReward": round(rr, 2),
+            "AverageVolume2": int(avg_volume2),
 
-            "Score": round(score, 2),
+            "EntrySpread": round(
+                entry_spread,
+                4,
+            ),
 
-            "TradeQuality": quality,
+            "TargetSpread": round(
+                target_spread,
+                4,
+            ),
 
-            "PositionSize": position,
+            "StopSpread": round(
+                stop_spread,
+                4,
+            ),
+
+            "RiskReward": round(
+                risk_reward,
+                2,
+            ),
+
+            "Score": round(
+                score,
+                2,
+            ),
+
+            "TradeQuality": trade_quality,
+
+            "PositionSize": position_size,
 
         }
 
     except Exception:
-
-        traceback.print_exc()
 
         return None
 
@@ -251,7 +335,7 @@ def run_scanner():
 
     if close_prices.empty:
 
-        print("No market data loaded.")
+        print("No market data found.")
 
         return pd.DataFrame()
 
@@ -262,11 +346,15 @@ def run_scanner():
         )
     )
 
-    print(f"Stocks Loaded : {len(close_prices.columns)}")
-    print(f"Pairs To Scan : {len(pairs):,}")
+    print(
+        f"Stocks Loaded : {len(close_prices.columns)}"
+    )
+
+    print(
+        f"Pairs To Scan : {len(pairs):,}"
+    )
 
     results = []
-
     with ThreadPoolExecutor(
         max_workers=MAX_WORKERS,
     ) as executor:
@@ -303,7 +391,7 @@ def run_scanner():
                     f"Processed {processed:,}/{len(pairs):,}"
                 )
 
-    if len(results) == 0:
+    if not results:
 
         print("No qualified pairs found.")
 
@@ -311,13 +399,14 @@ def run_scanner():
 
     df = pd.DataFrame(results)
 
-    df = df.sort_values(
+    df.sort_values(
         by=[
             "Score",
             "RiskReward",
             "ZScore",
         ],
         ascending=False,
+        inplace=True,
     )
 
     OUTPUT_DIR.mkdir(
@@ -341,12 +430,15 @@ def run_scanner():
     print("SCAN COMPLETE")
     print("=" * 60)
     print(f"Qualified Pairs : {len(df)}")
-    print(
-        f"Top {TOP_PAIRS} file saved."
-    )
+    print(f"Top {TOP_PAIRS} Pairs Saved")
+    print("=" * 60)
 
     return df
 
+
+# ============================================================
+# MAIN
+# ============================================================
 
 def main():
 
@@ -361,7 +453,9 @@ def main():
         print()
 
         print(
-            df.head(TOP_PAIRS).to_string(
+            df.head(
+                TOP_PAIRS
+            ).to_string(
                 index=False
             )
         )

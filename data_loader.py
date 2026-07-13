@@ -135,3 +135,122 @@ def get_latest_fno_list():
     )
 
     return []
+# ----------------------------------------------------
+# Batch Price Download
+# ----------------------------------------------------
+
+def download_price_data(
+    tickers,
+    lookback_days=LOOKBACK_DAYS,
+):
+    """
+    Download historical OHLCV data
+    """
+
+    if len(tickers) == 0:
+        return pd.DataFrame(), pd.DataFrame()
+
+    end_date = datetime.today()
+
+    start_date = end_date - timedelta(days=lookback_days)
+
+    logger.info(
+        "Downloading %d stocks...",
+        len(tickers)
+    )
+
+    try:
+
+        data = yf.download(
+            tickers=tickers,
+            start=start_date.strftime("%Y-%m-%d"),
+            end=end_date.strftime("%Y-%m-%d"),
+            auto_adjust=True,
+            progress=True,
+            group_by="ticker",
+            threads=True
+        )
+
+    except Exception as e:
+
+        logger.error(e)
+
+        return pd.DataFrame(), pd.DataFrame()
+
+    close_data = {}
+    volume_data = {}
+
+    for ticker in tickers:
+
+        try:
+
+            close = data[ticker]["Close"]
+
+            volume = data[ticker]["Volume"]
+
+            if len(close.dropna()) < MIN_HISTORY:
+                continue
+
+            name = ticker.replace(".NS", "")
+
+            close_data[name] = close
+
+            volume_data[name] = volume
+
+        except Exception:
+
+            continue
+
+    close_df = pd.DataFrame(close_data)
+
+    volume_df = pd.DataFrame(volume_data)
+
+    close_df = close_df.dropna(axis=1)
+
+    volume_df = volume_df.dropna(axis=1)
+
+    common = close_df.columns.intersection(
+        volume_df.columns
+    )
+
+    close_df = close_df[common]
+
+    volume_df = volume_df[common]
+
+    logger.info(
+        "Loaded %d Stocks",
+        len(common)
+    )
+
+    return close_df, volume_df
+
+
+# ----------------------------------------------------
+# Complete Loader
+# ----------------------------------------------------
+
+def load_market_data():
+
+    tickers = get_latest_fno_list()
+
+    if len(tickers) == 0:
+
+        logger.error(
+            "F&O List Empty"
+        )
+
+        return (
+            [],
+            pd.DataFrame(),
+            pd.DataFrame()
+        )
+
+    close_df, volume_df = download_price_data(
+        tickers
+    )
+
+    return (
+        tickers,
+        close_df,
+        volume_df
+    )

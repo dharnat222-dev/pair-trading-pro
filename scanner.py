@@ -5,7 +5,7 @@ scanner.py
 
 from itertools import combinations
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
+import traceback
 import pandas as pd
 import numpy as np
 
@@ -14,11 +14,11 @@ from config import (
     MIN_ZSCORE,
     MAX_VOLATILITY,
     MIN_AVG_VOLUME,
+    TOP_PAIRS,
+    OUTPUT_DIR,
 )
 
-from data_loader import (
-    load_market_data,
-)
+from data_loader import load_market_data
 
 from statistics import (
     calculate_correlation,
@@ -40,149 +40,210 @@ from statistics import (
 
 
 def analyze_pair(
-    ticker1,
-    ticker2,
-    close_prices,
-    volume_data,
+    ticker1: str,
+    ticker2: str,
+    close_prices: pd.DataFrame,
+    volume_data: pd.DataFrame,
 ):
 
-    s1 = close_prices[ticker1]
+    try:
 
-    s2 = close_prices[ticker2]
+        s1 = close_prices[ticker1]
 
-    correlation = calculate_correlation(
-        s1,
-        s2,
-    )
+        s2 = close_prices[ticker2]
 
-    rolling = calculate_rolling_correlation(
-        s1,
-        s2,
-    )
+        correlation = calculate_correlation(
+            s1,
+            s2,
+        )
 
-    rolling_last = rolling.iloc[-1]
+        if np.isnan(correlation):
+            return None
 
-    score, pvalue = calculate_cointegration(
-        s1,
-        s2,
-    )
+        rolling = calculate_rolling_correlation(
+            s1,
+            s2,
+        )
 
-    beta, alpha = calculate_beta(
-        s1,
-        s2,
-    )
+        if rolling.dropna().empty:
+            return None
 
-    spread = calculate_spread(
-        s1,
-        s2,
-        beta,
-    )
+        rolling_corr = rolling.iloc[-1]
 
-    adf_stat, adf_p = calculate_adf(
-        spread,
-    )
+        score, coint_p = calculate_cointegration(
+            s1,
+            s2,
+        )
 
-    if not validate_pair(
-        correlation,
-        rolling_last,
-        pvalue,
-        adf_p,
-        beta,
-    ):
+        beta, alpha = calculate_beta(
+            s1,
+            s2,
+        )
+
+        if np.isnan(beta):
+            return None
+
+        spread = calculate_spread(
+            s1,
+            s2,
+            beta,
+        )
+
+        adf_stat, adf_p = calculate_adf(
+            spread,
+        )
+
+        if not validate_pair(
+            correlation,
+            rolling_corr,
+            coint_p,
+            adf_p,
+            beta,
+        ):
+            return None
+
+        half_life = calculate_half_life(
+            spread,
+        )
+
+        hurst = calculate_hurst(
+            spread,
+        )
+
+        zscore = calculate_zscore(
+            spread,
+        )
+
+        if np.isnan(zscore):
+            return None
+
+        if abs(zscore) < MIN_ZSCORE:
+            return None
+
+        volatility = (
+            s1.pct_change()
+            .std()
+            * np.sqrt(252)
+        )
+
+        if np.isnan(volatility):
+            return None
+
+        if volatility > MAX_VOLATILITY:
+            return None
+
+        volume1 = float(
+            volume_data[ticker1]
+            .tail(20)
+            .mean()
+        )
+
+        volume2 = float(
+            volume_data[ticker2]
+            .tail(20)
+            .mean()
+        )
+
+        if (
+            volume1 < MIN_AVG_VOLUME
+            or
+            volume2 < MIN_AVG_VOLUME
+        ):
+            return None
+
+        action1, action2 = get_trade_signal(
+            zscore
+        )
+
+        score = calculate_mean_reversion_score(
+            correlation,
+            coint_p,
+            adf_p,
+            hurst,
+            half_life,
+        )
+
+        quality = get_trade_quality(
+            score
+        )
+
+        position = get_position_size(
+            volatility
+        )
+
+        entry = float(spread.iloc[-1])
+
+        target = float(
+            spread.rolling(60).mean().iloc[-1]
+        )
+
+        std = float(
+            spread.rolling(60).std().iloc[-1]
+        )
+
+        if entry > target:
+            stop = entry + (2 * std)
+        else:
+            stop = entry - (2 * std)
+
+        rr = calculate_risk_reward(
+            entry,
+            target,
+            stop,
+        )
+
+        return {
+
+            "Ticker1": ticker1,
+            "Action1": action1,
+
+            "Ticker2": ticker2,
+            "Action2": action2,
+
+            "Correlation": round(correlation, 4),
+            "RollingCorrelation": round(rolling_corr, 4),
+
+            "CointegrationPValue": round(coint_p, 4),
+
+            "ADFPValue": round(adf_p, 4),
+
+            "Beta": round(beta, 4),
+
+            "HalfLife": round(half_life, 2),
+
+            "Hurst": round(hurst, 4),
+
+            "ZScore": round(zscore, 2),
+
+            "Volatility": round(volatility, 4),
+
+            "AverageVolume1": int(volume1),
+            "AverageVolume2": int(volume2),
+
+            "EntrySpread": round(entry, 4),
+            "TargetSpread": round(target, 4),
+            "StopSpread": round(stop, 4),
+
+            "RiskReward": round(rr, 2),
+
+            "Score": round(score, 2),
+
+            "TradeQuality": quality,
+
+            "PositionSize": position,
+
+        }
+
+    except Exception:
+
+        traceback.print_exc()
+
         return None
 
-    half_life = calculate_half_life(
-        spread,
-    )
 
-    hurst = calculate_hurst(
-        spread,
-    )
-
-    zscore = calculate_zscore(
-        spread,
-    )
-
-    if np.isnan(zscore):
-        return None
-
-    if abs(zscore) < MIN_ZSCORE:
-        return None
-
-    volatility = (
-        s1.pct_change()
-        .std()
-        * np.sqrt(252)
-    )
-
-    if volatility > MAX_VOLATILITY:
-        return None
-
-    volume1 = volume_data[ticker1].tail(20).mean()
-    volume2 = volume_data[ticker2].tail(20).mean()
-
-    if (
-        volume1 < MIN_AVG_VOLUME
-        or
-        volume2 < MIN_AVG_VOLUME
-    ):
-        return None
-
-    signal1, signal2 = get_trade_signal(
-        zscore,
-    )
-
-    score = calculate_mean_reversion_score(
-        correlation,
-        pvalue,
-        adf_p,
-        hurst,
-        half_life,
-    )
-
-    quality = get_trade_quality(
-        score,
-    )
-
-    position = get_position_size(
-        volatility,
-    )
-
-    return {
-
-        "Ticker1": ticker1,
-        "Action1": signal1,
-
-        "Ticker2": ticker2,
-        "Action2": signal2,
-
-        "Correlation": round(correlation,4),
-        "RollingCorrelation": round(rolling_last,4),
-
-        "CointegrationPValue": round(pvalue,4),
-
-        "ADFPValue": round(adf_p,4),
-
-        "Beta": round(beta,4),
-
-        "HalfLife": round(half_life,2),
-
-        "Hurst": round(hurst,4),
-
-        "ZScore": round(zscore,2),
-
-        "Volatility": round(volatility,4),
-
-        "AverageVolume1": int(volume1),
-        "AverageVolume2": int(volume2),
-
-        "Score": score,
-
-        "TradeQuality": quality,
-
-        "PositionSize": position,
-
-    }
+# ============================================================
+# RUN SCANNER
+# ============================================================
 
 def run_scanner():
 
@@ -194,8 +255,6 @@ def run_scanner():
 
         return pd.DataFrame()
 
-    print(f"Stocks Loaded : {len(tickers)}")
-
     pairs = list(
         combinations(
             close_prices.columns,
@@ -203,7 +262,8 @@ def run_scanner():
         )
     )
 
-    print(f"Total Pairs : {len(pairs):,}")
+    print(f"Stocks Loaded : {len(close_prices.columns)}")
+    print(f"Pairs To Scan : {len(pairs):,}")
 
     results = []
 
@@ -240,9 +300,7 @@ def run_scanner():
             if processed % 500 == 0:
 
                 print(
-                    f"Processed "
-                    f"{processed:,}"
-                    f"/{len(pairs):,}"
+                    f"Processed {processed:,}/{len(pairs):,}"
                 )
 
     if len(results) == 0:
@@ -256,43 +314,25 @@ def run_scanner():
     df = df.sort_values(
         by=[
             "Score",
+            "RiskReward",
             "ZScore",
         ],
         ascending=False,
-    )
-
-    return df
-
-def save_results(df):
-
-    if df.empty:
-
-        print("Nothing to save.")
-
-        return
-
-    from config import (
-        OUTPUT_DIR,
-        TOP_PAIRS,
     )
 
     OUTPUT_DIR.mkdir(
         exist_ok=True,
     )
 
-    full_file = OUTPUT_DIR / "pair_signals.xlsx"
-
-    top_file = OUTPUT_DIR / "pair_signals_top10.xlsx"
-
     df.to_excel(
-        full_file,
+        OUTPUT_DIR / "pair_signals.xlsx",
         index=False,
     )
 
     df.head(
         TOP_PAIRS,
     ).to_excel(
-        top_file,
+        OUTPUT_DIR / "pair_signals_top10.xlsx",
         index=False,
     )
 
@@ -301,9 +341,11 @@ def save_results(df):
     print("SCAN COMPLETE")
     print("=" * 60)
     print(f"Qualified Pairs : {len(df)}")
-    print(f"Saved : {full_file}")
-    print(f"Saved : {top_file}")
-    print("=" * 60)
+    print(
+        f"Top {TOP_PAIRS} file saved."
+    )
+
+    return df
 
 
 def main():
@@ -314,12 +356,15 @@ def main():
 
     df = run_scanner()
 
-    save_results(df)
-
     if not df.empty:
 
         print()
-        print(df.head(10).to_string(index=False))
+
+        print(
+            df.head(TOP_PAIRS).to_string(
+                index=False
+            )
+        )
 
 
 if __name__ == "__main__":

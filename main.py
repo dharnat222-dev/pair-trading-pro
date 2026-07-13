@@ -3,161 +3,50 @@ PairTradingPro v1.0
 main.py
 """
 
-from __future__ import annotations
-
-import sys
 import time
-from pathlib import Path
+import pandas as pd
 
-from config import (
-    OUTPUT_DIR,
-    LOG_DIR,
-)
+from config import OUTPUT_DIR
+from data_loader import load_market_data
+from scanner import run_scanner
+from backtest import run_backtest
 
-from scanner import (
-    run_scanner,
-)
-
-from backtest import (
-    run_backtest,
-)
-
-
-# ============================================================
-# HEADER
-# ============================================================
-
-def print_header():
-
-    print()
-
-    print("=" * 70)
-
-    print("PAIR TRADING PRO v1.0")
-
-    print("=" * 70)
-
-    print()
-
-
-# ============================================================
-# CREATE PROJECT FOLDERS
-# ============================================================
-
-def create_directories():
-
-    OUTPUT_DIR.mkdir(
-        exist_ok=True,
-    )
-
-    LOG_DIR.mkdir(
-        exist_ok=True,
-    )
-
-# ============================================================
-# RUN SCANNER
-# ============================================================
-
-def execute_scanner():
-
-    print()
-
-    print("-" * 70)
-
-    print("Running Scanner...")
-
-    print("-" * 70)
-
-    start = time.time()
-
-    df = run_scanner()
-
-    elapsed = round(
-        time.time() - start,
-        2,
-    )
-
-    print()
-
-    print(f"Scanner Finished : {elapsed} sec")
-
-    return df
-
-
-# ============================================================
-# RUN BACKTEST
-# ============================================================
-
-def execute_backtest():
-
-    print()
-
-    print("-" * 70)
-
-    print("Running Backtest...")
-
-    print("-" * 70)
-
-    start = time.time()
-
-    run_backtest()
-
-    elapsed = round(
-        time.time() - start,
-        2,
-    )
-
-    print()
-
-    print(f"Backtest Finished : {elapsed} sec")
-
-# ============================================================
-# MAIN
-# ============================================================
 
 def main():
+    print("=" * 60)
+    print("PAIR TRADING PRO v1.0")
+    print("=" * 60)
 
-    print_header()
+    # Load market data
+    tickers, close_prices, volume_data = load_market_data()
+    
+    if close_prices.empty:
+        print("\n❌ No market data found. Exiting.")
+        return
 
-    create_directories()
+    # Run Scanner
+    print("\n" + "-" * 70)
+    print("Running Scanner...")
+    print("-" * 70)
+    
+    start = time.time()
+    scanner_results = run_scanner()
+    print(f"\nScanner Finished : {time.time() - start:.2f} sec")
 
-    try:
+    # Run Backtest if scanner results exist
+    if not scanner_results.empty:
+        print("\n" + "-" * 70)
+        print("Running Backtest...")
+        print("-" * 70)
+        
+        start = time.time()
+        backtest_results = run_backtest()
+        print(f"\nBacktest Finished : {time.time() - start:.2f} sec")
 
-        execute_scanner()
-
-        execute_backtest()
-
-        print()
-
-        print("=" * 70)
-
-        print("PROJECT COMPLETED SUCCESSFULLY")
-
-        print("=" * 70)
-
-    except KeyboardInterrupt:
-
-        print()
-
-        print("Execution Cancelled By User")
-
-        sys.exit(0)
-
-    except Exception as e:
-
-        print()
-
-        print("=" * 70)
-
-        print("PROJECT FAILED")
-
-        print("=" * 70)
-
-        print(str(e))
-
-        sys.exit(1)
+    print("\n" + "=" * 60)
+    print("PROJECT COMPLETED SUCCESSFULLY")
+    print("=" * 60)
 
 
 if __name__ == "__main__":
-
     main()

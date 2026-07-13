@@ -215,9 +215,11 @@ def download_price_data(
 
             if hist.empty:
 
-                failed.append(ticker)
+    failed.append(ticker)
 
-                continue
+    continue
+
+hist = hist.tz_localize(None)
 
             if len(hist) < MIN_HISTORY:
 

@@ -11,15 +11,23 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = BASE_DIR / "output"
 LOG_DIR = BASE_DIR / "logs"
+DATA_DIR = BASE_DIR / "data"
 
 OUTPUT_DIR.mkdir(exist_ok=True)
 LOG_DIR.mkdir(exist_ok=True)
+DATA_DIR.mkdir(exist_ok=True)
+
+# =========================
+# DATA SOURCE
+# =========================
+USE_CSV_DATA = True  # True = CSV ફાઈલ વાપરો, False = yfinance વાપરો
+CSV_FILE_PATH = DATA_DIR / "stock_data.csv"
 
 # =========================
 # DATA SETTINGS
 # =========================
 LOOKBACK_DAYS = 365
-ROLLING_WINDOW = 30          # ✅ 60 થી 30 કર્યું
+ROLLING_WINDOW = 30
 MIN_HISTORY = 250
 
 # =========================
@@ -33,7 +41,7 @@ MAX_ADF_PVALUE = 0.05
 MIN_BETA = 0.50
 MAX_BETA = 1.50
 
-MIN_ZSCORE = 1.50            # ✅ 1.20 થી 1.50 કર્યું (વૈકલ્પિક)
+MIN_ZSCORE = 1.50
 
 MAX_VOLATILITY = 0.60
 MIN_AVG_VOLUME = 50000

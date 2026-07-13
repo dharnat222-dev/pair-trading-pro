@@ -19,7 +19,7 @@ LOG_DIR.mkdir(exist_ok=True)
 # DATA SETTINGS
 # =========================
 LOOKBACK_DAYS = 365
-ROLLING_WINDOW = 60
+ROLLING_WINDOW = 30          # ✅ 60 થી 30 કર્યું
 MIN_HISTORY = 250
 
 # =========================
@@ -33,7 +33,7 @@ MAX_ADF_PVALUE = 0.05
 MIN_BETA = 0.50
 MAX_BETA = 1.50
 
-MIN_ZSCORE = 1.20
+MIN_ZSCORE = 1.50            # ✅ 1.20 થી 1.50 કર્યું (વૈકલ્પિક)
 
 MAX_VOLATILITY = 0.60
 MIN_AVG_VOLUME = 50000
@@ -52,7 +52,7 @@ MAX_HOLD_DAYS = 30
 TOP_PAIRS = 10
 
 # =========================
-# GITHUB
+# PERFORMANCE
 # =========================
 MAX_WORKERS = 8
 

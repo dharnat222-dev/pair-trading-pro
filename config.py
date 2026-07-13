@@ -55,3 +55,9 @@ TOP_PAIRS = 10
 # GITHUB
 # =========================
 MAX_WORKERS = 8
+
+# =========================
+# STATISTICS
+# =========================
+MIN_TRADING_DAYS = 100
+HURST_MAX_LAG = 20

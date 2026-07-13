@@ -266,3 +266,68 @@ def download_price_data(
         close_df,
         volume_df,
     )
+
+# ============================================================
+# LOAD COMPLETE MARKET DATA
+# ============================================================
+
+def load_market_data():
+
+    logger.info("=" * 60)
+    logger.info("Loading Market Data")
+    logger.info("=" * 60)
+
+    tickers = get_latest_fno_list()
+
+    if not tickers:
+
+        logger.error("Unable to load NSE F&O list")
+
+        return (
+            [],
+            pd.DataFrame(),
+            pd.DataFrame(),
+        )
+
+    close_df, volume_df = download_price_data(
+        tickers=tickers
+    )
+
+    if close_df.empty:
+
+        logger.error("Price data download failed")
+
+        return (
+            [],
+            pd.DataFrame(),
+            pd.DataFrame(),
+        )
+
+    logger.info("=" * 60)
+    logger.info("Market Data Ready")
+    logger.info("Stocks Loaded : %d", len(close_df.columns))
+    logger.info("Rows Loaded   : %d", len(close_df))
+    logger.info("=" * 60)
+
+    return (
+        list(close_df.columns),
+        close_df,
+        volume_df,
+    )
+
+
+# ============================================================
+# TEST
+# ============================================================
+
+if __name__ == "__main__":
+
+    stocks, close_prices, volume_data = load_market_data()
+
+    print()
+
+    print("=" * 60)
+    print("TOTAL STOCKS :", len(stocks))
+    print("PRICE SHAPE  :", close_prices.shape)
+    print("VOLUME SHAPE :", volume_data.shape)
+    print("=" * 60)

@@ -69,3 +69,17 @@ MAX_WORKERS = 8
 # =========================
 MIN_TRADING_DAYS = 100
 HURST_MAX_LAG = 20
+
+# =========================
+# ANGEL ONE API CREDENTIALS
+# =========================
+ANGEL_API_KEY = "your_api_key"
+ANGEL_CLIENT_ID = "your_client_id"
+ANGEL_PASSWORD = "your_password"
+ANGEL_TOTP = "your_totp"  # If 2FA enabled, else leave empty
+
+# =========================
+# DATA SOURCE
+# =========================
+USE_ANGEL_API = True
+USE_CSV_DATA = False  # CSV બંધ કરો

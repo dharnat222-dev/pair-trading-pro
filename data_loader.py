@@ -66,13 +66,8 @@ def get_latest_fno_list(days_back: int = 10):
         date_str = date.strftime("%Y%m%d")
 
         urls = [
-
-            f"https://nsearchives.nseindia.com/content/fo/"
-            f"BhavCopy_NSE_FO_0_0_0_{date_str}_F_0000.csv.zip",
-
-            f"https://nsearchives.nseindia.com/content/fo/"
-            f"BhavCopy_NSE_FO_0_0_0_{date_str}.csv.zip",
-
+            f"https://nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_0_0_0_{date_str}_F_0000.csv.zip",
+            f"https://nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_0_0_0_{date_str}.csv.zip",
         ]
 
         for url in urls:
@@ -117,27 +112,37 @@ def get_latest_fno_list(days_back: int = 10):
 
                 if "FinInstrmTp" in df.columns:
 
-                    eq = df[
-                        df["FinInstrmTp"] == "EQ"
-                    ][symbol_col].dropna().astype(str)
+                    eq = (
+                        df[
+                            df["FinInstrmTp"] == "EQ"
+                        ][symbol_col]
+                        .dropna()
+                        .astype(str)
+                    )
 
                     if not eq.empty:
                         stocks = eq.unique().tolist()
 
                 tickers = []
 
-                for s in stocks:
+                for stock in stocks:
+
+                    stock = stock.strip()
 
                     if (
-                        not s
-                        or s.isdigit()
-                        or s in BAD_SYMBOLS
+                        not stock
+                        or stock.isdigit()
+                        or stock in BAD_SYMBOLS
                     ):
                         continue
 
-                    tickers.append(f"{s}.NS")
+                    tickers.append(
+                        f"{stock}.NS"
+                    )
 
-                tickers = sorted(set(tickers))
+                tickers = sorted(
+                    set(tickers)
+                )
 
                 logger.info(
                     "Loaded %d F&O Stocks",
@@ -150,7 +155,9 @@ def get_latest_fno_list(days_back: int = 10):
 
                 continue
 
-    logger.error("Unable to download NSE F&O List.")
+    logger.error(
+        "Unable to download NSE F&O List."
+    )
 
     return []
 
@@ -215,28 +222,32 @@ def download_price_data(
 
             if hist.empty:
 
-    failed.append(ticker)
-
-    continue
-
-hist = hist.tz_localize(None)
-
-            if len(hist) < MIN_HISTORY:
-
-                failed.append(ticker)
+                failed.append(
+                    ticker
+                )
 
                 continue
 
-            name = ticker.replace(
+            hist = hist.tz_localize(None)
+
+            if len(hist) < MIN_HISTORY:
+
+                failed.append(
+                    ticker
+                )
+
+                continue
+
+            symbol = ticker.replace(
                 ".NS",
                 "",
             )
 
-            close_data[name] = hist[
+            close_data[symbol] = hist[
                 "Close"
             ]
 
-            volume_data[name] = hist[
+            volume_data[symbol] = hist[
                 "Volume"
             ]
 
@@ -258,7 +269,9 @@ hist = hist.tz_localize(None)
 
         except Exception:
 
-            failed.append(ticker)
+            failed.append(
+                ticker
+            )
 
             continue
 
@@ -290,14 +303,16 @@ hist = hist.tz_localize(None)
             pd.DataFrame(),
         )
 
-    close_df.dropna(
-        inplace=True,
+    # Remove stocks having incomplete history
+    close_df = close_df.dropna(
+        axis=1,
     )
 
-    volume_df = volume_df.loc[
-        close_df.index
-    ]
+    volume_df = volume_df.dropna(
+        axis=1,
+    )
 
+    # Keep only common stocks
     common = close_df.columns.intersection(
         volume_df.columns
     )
@@ -308,6 +323,19 @@ hist = hist.tz_localize(None)
 
     volume_df = volume_df[
         common
+    ]
+
+    # Keep only common dates
+    common_index = close_df.index.intersection(
+        volume_df.index
+    )
+
+    close_df = close_df.loc[
+        common_index
+    ]
+
+    volume_df = volume_df.loc[
+        common_index
     ]
 
     return (

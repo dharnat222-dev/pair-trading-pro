@@ -1,8 +1,6 @@
 """
 PairTradingPro v1.0
 statistics.py
-
-Statistical Engine
 """
 
 from __future__ import annotations
@@ -11,133 +9,73 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 
-from statsmodels.tsa.stattools import (
-    coint,
-    adfuller,
-)
+from statsmodels.tsa.stattools import coint, adfuller
 
 from config import (
     ROLLING_WINDOW,
+    MIN_CORRELATION,
+    MIN_ROLLING_CORRELATION,
+    MAX_COINTEGRATION_PVALUE,
+    MAX_ADF_PVALUE,
+    MIN_BETA,
+    MAX_BETA,
 )
 
-# ============================================================
-# CORRELATION
-# ============================================================
 
-def calculate_correlation(
-    series1: pd.Series,
-    series2: pd.Series,
-) -> float:
+def calculate_correlation(series1: pd.Series,
+                          series2: pd.Series) -> float:
 
-    returns1 = series1.pct_change().dropna()
+    r1 = series1.pct_change().dropna()
+    r2 = series2.pct_change().dropna()
 
-    returns2 = series2.pct_change().dropna()
-
-    if len(returns1) < 50 or len(returns2) < 50:
+    if len(r1) < 50 or len(r2) < 50:
         return np.nan
 
-    return returns1.corr(returns2)
+    return float(r1.corr(r2))
 
 
-# ============================================================
-# ROLLING CORRELATION
-# ============================================================
+def calculate_rolling_correlation(series1: pd.Series,
+                                  series2: pd.Series,
+                                  window: int = ROLLING_WINDOW):
 
-def calculate_rolling_correlation(
-    series1: pd.Series,
-    series2: pd.Series,
-    window: int = ROLLING_WINDOW,
-):
+    r1 = series1.pct_change()
+    r2 = series2.pct_change()
 
-    returns1 = series1.pct_change()
-
-    returns2 = series2.pct_change()
-
-    rolling_corr = (
-        returns1
-        .rolling(window)
-        .corr(returns2)
-    )
-
-    return rolling_corr
+    return r1.rolling(window).corr(r2)
 
 
-# ============================================================
-# COINTEGRATION
-# ============================================================
-
-def calculate_cointegration(
-    series1: pd.Series,
-    series2: pd.Series,
-):
+def calculate_cointegration(series1: pd.Series,
+                            series2: pd.Series):
 
     try:
 
-        score, pvalue, _ = coint(
-            series1,
-            series2,
-        )
+        score, pvalue, _ = coint(series1, series2)
 
-        return score, pvalue
+        return float(score), float(pvalue)
 
     except Exception:
 
         return np.nan, 1.0
 
 
-# ============================================================
-# BETA / HEDGE RATIO
-# ============================================================
-
-def calculate_beta(
-    series1: pd.Series,
-    series2: pd.Series,
-):
+def calculate_beta(series1: pd.Series,
+                   series2: pd.Series):
 
     try:
 
         X = sm.add_constant(series2)
 
-        model = sm.OLS(
-            series1,
-            X,
-        ).fit()
+        model = sm.OLS(series1, X).fit()
 
-        beta = model.params.iloc[1]
+        beta = float(model.params.iloc[1])
 
-        alpha = model.params.iloc[0]
+        alpha = float(model.params.iloc[0])
 
         return beta, alpha
 
     except Exception:
 
         return np.nan, np.nan
-
-# ============================================================
-# ADF TEST
-# ============================================================
-
-def calculate_adf(
-    spread: pd.Series,
-):
-
-    try:
-
-        result = adfuller(
-            spread.dropna(),
-            autolag="AIC",
-        )
-
-        adf_stat = result[0]
-
-        pvalue = result[1]
-
-        return adf_stat, pvalue
-
-    except Exception:
-
-        return np.nan, 1.0
-
 
 # ============================================================
 # SPREAD
@@ -153,11 +91,103 @@ def calculate_spread(
 
 
 # ============================================================
+# ADF TEST
+# ============================================================
+
+def calculate_adf(
+    spread: pd.Series,
+):
+
+    try:
+
+        adf_stat, pvalue, *_ = adfuller(
+            spread.dropna(),
+            autolag="AIC",
+        )
+
+        return float(adf_stat), float(pvalue)
+
+    except Exception:
+
+        return np.nan, 1.0
+
+
+# ============================================================
 # HALF LIFE
 # ============================================================
 
 def calculate_half_life(
-    spread:
+    spread: pd.Series,
+):
+
+    try:
+
+        spread_lag = spread.shift(1).dropna()
+
+        spread_diff = spread.diff().dropna()
+
+        spread_lag = spread_lag.loc[
+            spread_diff.index
+        ]
+
+        X = sm.add_constant(
+            spread_lag
+        )
+
+        model = sm.OLS(
+            spread_diff,
+            X,
+        ).fit()
+
+        theta = model.params.iloc[1]
+
+        if theta >= 0:
+            return np.inf
+
+        return float(
+            -np.log(2) / theta
+        )
+
+    except Exception:
+
+        return np.inf
+
+
+# ============================================================
+# Z SCORE
+# ============================================================
+
+def calculate_zscore(
+    spread: pd.Series,
+    window: int = ROLLING_WINDOW,
+):
+
+    rolling_mean = (
+        spread
+        .rolling(window)
+        .mean()
+    )
+
+    rolling_std = (
+        spread
+        .rolling(window)
+        .std()
+    )
+
+    if rolling_mean.dropna().empty:
+        return np.nan
+
+    last_mean = rolling_mean.iloc[-1]
+
+    last_std = rolling_std.iloc[-1]
+
+    if pd.isna(last_std) or last_std == 0:
+        return np.nan
+
+    return float(
+        (spread.iloc[-1] - last_mean)
+        / last_std
+    )
 
 # ============================================================
 # HURST EXPONENT
@@ -210,109 +240,46 @@ def calculate_hurst(
 
 
 # ============================================================
-# MEAN REVERSION SCORE
-# ============================================================
-
-def calculate_mean_reversion_score(
-    correlation: float,
-    coint_pvalue: float,
-    adf_pvalue: float,
-    hurst: float,
-):
-
-    score = 0
-
-    if correlation >= 0.90:
-        score += 30
-    elif correlation >= 0.80:
-        score += 25
-    elif correlation >= 0.70:
-        score += 20
-
-    if coint_pvalue <= 0.01:
-        score += 30
-    elif coint_pvalue <= 0.05:
-        score += 25
-    elif coint_pvalue <= 0.10:
-        score += 20
-
-    if adf_pvalue <= 0.01:
-        score += 20
-    elif adf_pvalue <= 0.05:
-        score += 15
-    elif adf_pvalue <= 0.10:
-        score += 10
-
-    if not np.isnan(hurst):
-
-        if hurst < 0.40:
-            score += 20
-        elif hurst < 0.50:
-            score += 15
-        elif hurst < 0.60:
-            score += 10
-
-    return min(score, 100)
-
-
-# ============================================================
-# RISK REWARD
-# ============================================================
-
-def calculate_risk_reward(
-    entry_spread: float,
-    target_spread: float,
-    stop_spread: float,
-):
-
-    reward = abs(
-        target_spread - entry_spread
-    )
-
-    risk = abs(
-        stop_spread - entry_spread
-    )
-
-    if risk == 0:
-        return np.nan
-
-    return reward / risk
-
-
-# ============================================================
 # VALIDATE PAIR
 # ============================================================
 
 def validate_pair(
-    correlation,
-    rolling_corr,
-    coint_pvalue,
-    adf_pvalue,
-    beta,
+    correlation: float,
+    rolling_corr: float,
+    coint_pvalue: float,
+    adf_pvalue: float,
+    beta: float,
 ):
 
     if np.isnan(correlation):
         return False
 
+    if np.isnan(rolling_corr):
+        return False
+
     if np.isnan(beta):
         return False
 
-    if correlation < 0.70:
+    if correlation < MIN_CORRELATION:
         return False
 
-    if rolling_corr < 0.60:
+    if rolling_corr < MIN_ROLLING_CORRELATION:
         return False
 
-    if coint_pvalue > 0.05:
+    if coint_pvalue > MAX_COINTEGRATION_PVALUE:
         return False
 
-    if adf_pvalue > 0.05:
+    if adf_pvalue > MAX_ADF_PVALUE:
         return False
 
-    if beta < 0.50 or beta > 1.50:
+    if beta < MIN_BETA:
+        return False
+
+    if beta > MAX_BETA:
         return False
 
     return True
+
 
 # ============================================================
 # TRADE SIGNAL
@@ -332,6 +299,61 @@ def get_trade_signal(
         return "BUY", "SELL"
 
     return "NO TRADE", "NO TRADE"
+
+# ============================================================
+# MEAN REVERSION SCORE
+# ============================================================
+
+def calculate_mean_reversion_score(
+    correlation: float,
+    coint_pvalue: float,
+    adf_pvalue: float,
+    hurst: float,
+    half_life: float,
+):
+
+    score = 0
+
+    if correlation >= 0.90:
+        score += 25
+    elif correlation >= 0.85:
+        score += 20
+    elif correlation >= 0.80:
+        score += 15
+    elif correlation >= 0.70:
+        score += 10
+
+    if coint_pvalue <= 0.01:
+        score += 20
+    elif coint_pvalue <= 0.05:
+        score += 15
+    elif coint_pvalue <= 0.10:
+        score += 10
+
+    if adf_pvalue <= 0.01:
+        score += 20
+    elif adf_pvalue <= 0.05:
+        score += 15
+    elif adf_pvalue <= 0.10:
+        score += 10
+
+    if not np.isnan(hurst):
+
+        if hurst < 0.40:
+            score += 20
+        elif hurst < 0.50:
+            score += 15
+        elif hurst < 0.60:
+            score += 10
+
+    if half_life < 20:
+        score += 15
+    elif half_life < 40:
+        score += 10
+    elif half_life < 60:
+        score += 5
+
+    return min(score, 100)
 
 
 # ============================================================
@@ -378,39 +400,31 @@ def get_trade_quality(
 
 
 # ============================================================
+# RISK REWARD
+# ============================================================
+
+def calculate_risk_reward(
+    entry_spread: float,
+    target_spread: float,
+    stop_spread: float,
+):
+
+    reward = abs(target_spread - entry_spread)
+
+    risk = abs(stop_spread - entry_spread)
+
+    if risk == 0:
+        return np.nan
+
+    return reward / risk
+
+
+# ============================================================
 # TEST
 # ============================================================
 
 if __name__ == "__main__":
 
     print("=" * 60)
-    print("PairTradingPro Statistics Engine")
+    print("PairTradingPro Statistics Engine Loaded Successfully")
     print("=" * 60)
-
-    s1 = pd.Series(
-        np.random.normal(
-            100,
-            2,
-            300
-        )
-    )
-
-    s2 = pd.Series(
-        np.random.normal(
-            98,
-            2,
-            300
-        )
-    )
-
-    corr = calculate_correlation(
-        s1,
-        s2
-    )
-
-    beta, alpha = calculate_beta(
-        s1,
-        s2
-    )
-
-    spread = calculate_spread

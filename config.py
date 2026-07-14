@@ -79,3 +79,8 @@ MAX_WORKERS = 8
 # =========================
 MIN_TRADING_DAYS = 100
 HURST_MAX_LAG = 20
+
+ANGEL_API_KEY = "3k16AOie"
+ANGEL_CLIENT_ID = "K202720" 
+ANGEL_PASSWORD =  "1992"
+ANGEL_TOTP = ""  # 2FA હોય તો TOTP આપો

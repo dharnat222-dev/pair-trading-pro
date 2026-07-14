@@ -21,13 +21,13 @@ DATA_DIR.mkdir(exist_ok=True)
 # DATA SOURCE
 # =========================
 # CSV MODE (OFF - We use Angel API)
-USE_CSV_DATA = False
+USE_CSV_DATA = True
 CSV_FILE_PATH = DATA_DIR / "stock_data.csv"
 
 # =========================
 # ANGEL ONE API - ENABLED
 # =========================
-USE_ANGEL_API = True
+USE_ANGEL_API = False
 ANGEL_API_KEY = "your_api_key"
 ANGEL_CLIENT_ID = "your_client_id"
 ANGEL_PASSWORD = "your_password"

@@ -82,4 +82,4 @@ ANGEL_TOTP = "your_totp"  # If 2FA enabled, else leave empty
 # DATA SOURCE
 # =========================
 USE_ANGEL_API = True
-USE_CSV_DATA = False  # CSV બંધ કરો
+USE_CSV_DATA = True  # CSV બંધ કરો

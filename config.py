@@ -18,20 +18,19 @@ LOG_DIR.mkdir(exist_ok=True)
 DATA_DIR.mkdir(exist_ok=True)
 
 # =========================
-# DATA SOURCE
+# DATA SOURCE - CSV MODE (ENABLED)
 # =========================
-# CSV MODE (OFF - We use Angel API)
 USE_CSV_DATA = True
-CSV_FILE_PATH = DATA_DIR / "stock_data.csv"
+CSV_FILE_PATH = DATA_DIR / "stock_data_210.csv"
 
 # =========================
-# ANGEL ONE API - ENABLED
+# ANGEL ONE API - DISABLED
 # =========================
 USE_ANGEL_API = False
 ANGEL_API_KEY = "your_api_key"
 ANGEL_CLIENT_ID = "your_client_id"
 ANGEL_PASSWORD = "your_password"
-ANGEL_TOTP = ""  # 2FA હોય તો
+ANGEL_TOTP = ""
 
 # =========================
 # DATA SETTINGS
@@ -41,17 +40,17 @@ ROLLING_WINDOW = 30
 MIN_HISTORY = 250
 
 # =========================
-# SCANNER FILTERS
+# SCANNER FILTERS (RELAXED)
 # =========================
-MIN_CORRELATION = 0.60
-MIN_ROLLING_CORRELATION = 0.50
-MAX_COINTEGRATION_PVALUE = 0.15
-MAX_ADF_PVALUE = 0.15
+MIN_CORRELATION = 0.50
+MIN_ROLLING_CORRELATION = 0.40
+MAX_COINTEGRATION_PVALUE = 0.30
+MAX_ADF_PVALUE = 0.30
 
-MIN_BETA = 0.30
-MAX_BETA = 2.00
+MIN_BETA = 0.20
+MAX_BETA = 3.00
 
-MIN_ZSCORE = 1.20
+MIN_ZSCORE = 0.80
 
 MAX_VOLATILITY = 0.70
 MIN_AVG_VOLUME = 30000
@@ -79,8 +78,3 @@ MAX_WORKERS = 8
 # =========================
 MIN_TRADING_DAYS = 100
 HURST_MAX_LAG = 20
-
-ANGEL_API_KEY = "3k16AOie"
-ANGEL_CLIENT_ID = "K202720" 
-ANGEL_PASSWORD =  "1992"
-ANGEL_TOTP = ""  # 2FA હોય તો TOTP આપો
